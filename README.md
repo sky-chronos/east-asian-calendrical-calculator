@@ -6,7 +6,7 @@
 ## 🌐 실행 페이지
 
 👉 **GitHub Pages**
-- https://sky-chronos.github.io/sajuweb-cal/
+- https://sky-chronos.github.io/sajudosaweb/
 
 ---
 
