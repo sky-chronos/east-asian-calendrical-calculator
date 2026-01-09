@@ -11,6 +11,7 @@
       margin: 24px;
       line-height: 1.6;
       background: #fafafa;
+      color: #111;
     }
 
     h1 { margin-top: 0; }
@@ -61,18 +62,8 @@
       margin-left: 8px;
     }
 
-    .ok {
-      color: #0a7;
-      font-weight: 700;
-      margin-top: 12px;
-    }
-
-    .err {
-      color: #c00;
-      font-weight: 700;
-      margin-top: 12px;
-      white-space: pre-wrap;
-    }
+    .ok { color: #0a7; font-weight: 700; }
+    .err { color: #c00; font-weight: 700; white-space: pre-wrap; }
 
     pre {
       background: #f9f9f9;
@@ -99,62 +90,40 @@
       text-align: center;
     }
 
-    /* =========================
-       Mobile UI 개선 (≤ 768px)
-    ========================= */
+    /* ===== Dark Mode ===== */
+    body.dark {
+      background: #121212;
+      color: #eaeaea;
+    }
+    body.dark .card {
+      background: #1e1e1e;
+      border-color: #333;
+    }
+    body.dark input,
+    body.dark select,
+    body.dark button,
+    body.dark pre {
+      background: #2a2a2a;
+      color: #eaeaea;
+      border-color: #444;
+    }
+    body.dark .badge {
+      background: #333;
+    }
+
+    /* ===== Mobile ===== */
     @media (max-width: 768px) {
-
-      body {
-        margin: 12px;
-      }
-
-      .card {
-        padding: 16px;
-        border-radius: 12px;
-      }
-
-      h1 {
-        font-size: 20px;
-      }
-
-      h3 {
-        font-size: 16px;
-        margin-top: 18px;
-      }
-
-      .row {
-        gap: 8px;
-      }
-
-      /* 입력 요소 세로 정렬 */
-      .row label {
-        width: 100%;
-      }
-
-      input, select {
-        width: 100%;
-        font-size: 16px; /* 모바일 키보드 확대 방지 */
-      }
-
-      button {
+      body { margin: 12px; }
+      .card { padding: 16px; }
+      h1 { font-size: 20px; }
+      h3 { font-size: 16px; }
+      .row label { width: 100%; }
+      input, select, button {
         width: 100%;
         font-size: 16px;
-        padding: 12px;
       }
-
-      .actions {
-        flex-direction: column;
-      }
-
-      pre {
-        font-size: 13px;
-        padding: 14px;
-      }
-
-      footer {
-        padding: 0 12px;
-        font-size: 11px;
-      }
+      .actions { flex-direction: column; }
+      pre { font-size: 13px; }
     }
   </style>
 </head>
@@ -162,6 +131,7 @@
 <body>
   <div class="card">
     <h1>사주도사 – STEP 4-4 (무료)</h1>
+    <button id="btnTheme" type="button">🌙 다크모드</button>
 
     <p>
       음력/윤달 입력 → <b>KASI 기준 양력 확정</b> →
@@ -170,30 +140,22 @@
 
     <h3>달력 선택</h3>
     <div class="row">
-      <label>
-        <input type="radio" name="calendarType" value="solar" checked />
-        양력
-      </label>
-      <label>
-        <input type="radio" name="calendarType" value="lunar" />
-        음력
-      </label>
+      <label><input type="radio" name="calendarType" value="solar" checked> 양력</label>
+      <label><input type="radio" name="calendarType" value="lunar"> 음력</label>
       <span class="badge" id="engineBadge">엔진: 범용</span>
     </div>
 
     <div class="row hidden" id="engineRow">
-      <label>
-        음력 변환 엔진
+      <label>음력 엔진
         <select id="lunarEngine">
           <option value="universal">범용(차단)</option>
-          <option value="kasi">KASI(오프라인)</option>
+          <option value="kasi">KASI</option>
         </select>
       </label>
     </div>
 
     <div class="row hidden" id="leapRow">
-      <label>
-        윤달 여부
+      <label>윤달
         <select id="isLeapMonth">
           <option value="false">평달</option>
           <option value="true">윤달</option>
@@ -214,28 +176,28 @@
 
     <button id="btnCalc" type="button">계산 실행</button>
     <button id="btnReset" type="button">입력 초기화 🔄</button>
-    
-    <h3>결과</h3>
+
+    <h3>
+      결과
+      <button id="btnToggleResult" type="button">접기 ▲</button>
+    </h3>
+
     <div id="msg" class="ok"></div>
     <div id="err" class="err"></div>
     <pre id="debug"></pre>
 
     <div class="actions">
-      <button id="btnCopy" type="button">📋 결과 복사</button>
-      <button id="btnCopyGPT" type="button">🤖 GPT용 복사</button>
+      <button id="btnCopy">📋 결과 복사</button>
+      <button id="btnCopyGPT">🤖 GPT용 복사</button>
       <button onclick="window.print()">🖨️ PDF 저장</button>
     </div>
   </div>
 
   <footer>
-    계산 기준: KASI(한국천문연구원) 음력 변환 · KST 기준 ·
-    입춘/절기 기준 사주 · 대운/세운/월운 자동 계산<br>
-    본 도구는 참고용이며, 선택과 판단의 책임은 사용자에게 있습니다.
+    계산 기준: KASI · KST · 입춘/절기 기준 · 대운/세운/월운 자동 계산
   </footer>
 
-  <!-- 반드시 이 순서 -->
   <script src="./vendor/korean-lunar-calendar.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
-
