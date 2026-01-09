@@ -74,9 +74,13 @@
 </div>
 
 <div class="card">
-  <h3 style="margin:0 0 8px 0">GPT용 출력</h3>
-  <button onclick="copyGPT()">GPT로 복사</button>
-  <pre id="raw">—</pre>
+<h3 style="margin:0 0 8px 0">GPT용 출력</h3>
+<div class="row">
+  <button onclick="copyGPT()">📋 결과 복사</button>
+  <button onclick="openGPT()">🤖 GPT에서 해석</button>
+</div>
+<pre id="raw">—</pre>
+
 </div>
 
 <script>
@@ -110,7 +114,26 @@ function parseKST(dateStr,timeStr){
   const [h,m]=timeStr.split(":").map(Number);
   return {Y,M,D,h,m};
 }
+function openGPT(){
+  const text = document.getElementById("raw").textContent;
+  if(!text || text.trim() === "—"){
+    alert("먼저 NASA 기준 계산을 실행하세요.");
+    return;
+  }
 
+  // 로그를 자동으로 복사
+  navigator.clipboard.writeText(text);
+
+  // Sky Chronos GPT (당신의 GPT 링크로 교체)
+  const url = "https://chat.openai.com/g/g-xxxxxxxx-sky-chronos";
+
+  window.open(url, "_blank");
+
+  alert("계산 결과가 복사되었습니다.\nGPT 창이 열리면 그대로 붙여넣기 하세요.");
+}
+
+
+  
 /* ========= Astronomy (NOAA-style, debug-friendly) =========
    목표: 태양 겉보기 황경 λ_app (deg), 평균 황경 λ_mean (deg)
    - Julian Day from UTC
@@ -350,3 +373,4 @@ function copyGPT(){
 </script>
 </body>
 </html>
+
