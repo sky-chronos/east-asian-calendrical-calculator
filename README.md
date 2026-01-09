@@ -3,6 +3,23 @@
 (KASI 기준 · GitHub Pages 실행)
 
 ---
+## 🌐 실행 페이지
+
+👉 **GitHub Pages**
+- https://sky-chronos.github.io/sajuweb-cal/
+
+---
+
+## 🖥️ 실행 화면
+
+### 입력 화면
+![입력 화면](docs/screenshots/main-input.png)
+
+### 계산 결과 화면
+![계산 결과](docs/screenshots/result-output.png)
+
+
+---
 
 ## 📌 프로젝트 소개
 
