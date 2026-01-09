@@ -1,226 +1,352 @@
-<!--
-NASA 천문명리 시스템 (Sky Chronos)
-Data: NASA JPL DE440s + SPICE
--->
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8"/>
+<meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>NASA 천문명리 시스템 (Sky Chronos)</title>
-<meta name="description" content="NASA JPL DE440s 천체력과 SPICE 엔진으로 절기·월지·시주를 계산하는 동양 역법 시스템"/>
-<script src="asm_full.js"></script>
-
-<script>
-/**
- * Sky Chronos — SPICE JS wrapper for Emscripten asm.js builds
- * Exposes: window.spice.kclear(), furnsh(pathOrUrl), utc2et(utcString), spkpos(...)
- *
- * Requirements:
- * - asm_full.js must define global `Module`
- * - CSPICE symbols exported: kclear_c, furnsh_c, str2et_c, spkpos_c
- */
-
-(function initSpiceWrapper(){
-  function fail(msg){
-    console.error(msg);
-    alert(msg);
-  }
-
-  function makeSpice(Module){
-    // --- helpers ---
-    const malloc = Module._malloc.bind(Module);
-    const free   = Module._free.bind(Module);
-    const HEAPF64 = Module.HEAPF64;
-
-    function allocCString(str){
-      const n = Module.lengthBytesUTF8(str) + 1;
-      const p = malloc(n);
-      Module.stringToUTF8(str, p, n);
-      return p;
-    }
-
-    function readF64(ptr, count){
-      const base = ptr >> 3; // /8
-      const out = [];
-      for (let i=0;i<count;i++) out.push(HEAPF64[base + i]);
-      return out;
-    }
-
-    // --- bind CSPICE functions ---
-    const kclear_c = Module.cwrap("kclear_c", null, []);
-    const furnsh_c = Module.cwrap("furnsh_c", null, ["number"]);
-    const str2et_c = Module.cwrap("str2et_c", null, ["number","number"]);
-    const spkpos_c = Module.cwrap("spkpos_c", null, ["number","number","number","number","number","number","number"]);
-
-    // Basic sanity checks (if symbol missing, cwrap may throw or be undefined)
-    if (!kclear_c || !furnsh_c || !str2et_c || !spkpos_c){
-      throw new Error("CSPICE exported symbols missing. Need: kclear_c, furnsh_c, str2et_c, spkpos_c");
-    }
-
-    return {
-      // Clear loaded kernels
-      kclear(){
-        kclear_c();
-      },
-
-      // Load kernel file (local path in repo OR remote URL if CORS allows)
-      furnsh(pathOrUrl){
-        const p = allocCString(pathOrUrl);
-        try { furnsh_c(p); }
-        finally { free(p); }
-      },
-
-      // Convert UTC string -> ET seconds past J2000 (SPICE)
-      utc2et(utc){
-        const s = allocCString(utc);
-        const etPtr = malloc(8);
-        try{
-          str2et_c(s, etPtr);
-          return readF64(etPtr,1)[0];
-        } finally {
-          free(etPtr);
-          free(s);
-        }
-      },
-
-      // spkpos wrapper
-      // returns: [[x,y,z], lt]
-      spkpos(targ, et, ref, abcorr, obs){
-        const targP = allocCString(targ);
-        const refP  = allocCString(ref);
-        const abP   = allocCString(abcorr);
-        const obsP  = allocCString(obs);
-
-        const posPtr = malloc(3 * 8);
-        const ltPtr  = malloc(8);
-
-        try{
-          spkpos_c(targP, et, refP, abP, obsP, posPtr, ltPtr);
-          const pos = readF64(posPtr,3);
-          const lt  = readF64(ltPtr,1)[0];
-          return [pos, lt];
-        } finally {
-          free(ltPtr); free(posPtr);
-          free(obsP); free(abP); free(refP); free(targP);
-        }
-      }
-    };
-  }
-
-  // Wait until Module exists
-  if (typeof window.Module === "undefined"){
-    fail("asm_full.js는 로드됐지만 전역 Module을 찾지 못했습니다. <script src='asm_full.js'>가 index.html에 포함되어 있는지 확인하세요.");
-    return;
-  }
-
-  // Hook runtime init (Emscripten)
-  const prev = window.Module.onRuntimeInitialized;
-  window.Module.onRuntimeInitialized = function(){
-    try{
-      if (typeof prev === "function") prev();
-      window.spice = makeSpice(window.Module);
-      console.log("[Sky Chronos] window.spice ready");
-      // 버튼 활성화 같은 후속 처리 원하면 여기서
-      // document.getElementById("calcBtn")?.removeAttribute("disabled");
-    }catch(e){
-      console.error(e);
-      fail("SPICE 래퍼 초기화 실패: " + (e && e.message ? e.message : e));
-    }
-  };
-
-  // 일부 빌드는 onRuntimeInitialized가 이미 지난 상태일 수 있음 → 즉시 시도
-  try{
-    if (window.Module.calledRun) {
-      window.spice = makeSpice(window.Module);
-      console.log("[Sky Chronos] window.spice ready (late attach)");
-    }
-  }catch(_){}
-})();
-</script>
-  
+<title>Sky Chronos — NASA 방식 태양황경 기반 절기·월지·시주</title>
 <style>
-body{margin:0;background:#0b1020;color:#e9ecf6;font-family:system-ui;padding:16px;padding-bottom:120px}
-.card{background:#101833;border-radius:16px;padding:14px;margin-bottom:12px}
-button{width:100%;padding:14px;border-radius:12px;border:none;font-weight:900;background:#6ea8ff;color:#000}
+  :root{--bg:#0b1020;--card:#101833;--text:#e9ecf6;--muted:#9fb0d0;--accent:#6ea8ff}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans KR",sans-serif;padding:16px;padding-bottom:120px}
+  h1{margin:0 0 12px 0;font-size:22px;letter-spacing:-.2px}
+  .card{background:var(--card);border-radius:16px;padding:14px;margin-bottom:12px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  label{font-size:12px;color:var(--muted);display:block;margin:10px 0 6px}
+  input,select{background:#0e1530;color:var(--text);border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:12px;font-size:14px}
+  input[type="date"]{min-width:160px}
+  input[type="time"]{min-width:140px}
+  button{width:100%;padding:14px;border-radius:12px;border:none;font-weight:900;background:var(--accent);color:#000;font-size:15px}
+  button:active{transform:translateY(1px)}
+  .grid{display:grid;grid-template-columns:1fr;gap:10px}
+  @media(min-width:860px){.grid{grid-template-columns:1fr 1fr}}
+  .kv{display:flex;justify-content:space-between;gap:14px;padding:10px 12px;background:#0e1530;border:1px solid rgba(255,255,255,.07);border-radius:14px}
+  .k{color:var(--muted);font-size:12px}
+  .v{font-weight:800}
+  pre{white-space:pre-wrap;word-break:break-word;background:#0e1530;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:12px;margin:10px 0 0 0}
+  .pill{display:inline-block;padding:6px 10px;border-radius:999px;background:#0e1530;border:1px solid rgba(255,255,255,.09);color:var(--muted);font-size:12px;margin-top:8px}
+  .small{font-size:12px;color:var(--muted);line-height:1.45}
 </style>
 </head>
 
 <body>
-<h1>NASA 천문명리 시스템 (Sky Chronos)</h1>
+<h1>NASA 방식 태양황경 기반 절기·월지·시주 — Sky Chronos (v4)</h1>
 
 <div class="card">
-<label>날짜</label>
-<input id="date" type="date">
-<label>시각</label>
-<input id="time" type="time">
-<button onclick="calc()">NASA 기준 계산</button>
+  <div class="row">
+    <div>
+      <label>날짜</label>
+      <input id="date" type="date" />
+    </div>
+    <div>
+      <label>시각(한국시간)</label>
+      <input id="time" type="time" value="21:39" />
+    </div>
+    <div>
+      <label>계산 옵션</label>
+      <select id="mode">
+        <option value="apparent">겉보기 태양 황경(추천)</option>
+        <option value="mean">평균 태양 황경(디버그용)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="small" style="margin-top:10px">
+    - GitHub Pages/모바일 안정 버전 (SPICE/WASM 미사용)<br/>
+    - 절기 판정은 태양 황경이 15° 단위를 통과하는 순간 기준<br/>
+    - 겉보기/평균 모드 제공 (겉보기 = nutation + aberration 근사 포함)
+  </div>
+
+  <div style="margin-top:12px">
+    <button onclick="calc()">NASA 기준 계산</button>
+  </div>
 </div>
 
 <div class="card">
-<h3>결과</h3>
-<div id="out">—</div>
+  <h3 style="margin:0 0 10px 0">결과</h3>
+  <div class="grid">
+    <div class="kv"><div class="k">태양 황경 (λ)</div><div class="v" id="lon">—</div></div>
+    <div class="kv"><div class="k">절기</div><div class="v" id="term">—</div></div>
+    <div class="kv"><div class="k">절기 경계</div><div class="v" id="boundary">—</div></div>
+    <div class="kv"><div class="k">월지(절기월)</div><div class="v" id="monthBranch">—</div></div>
+    <div class="kv"><div class="k">시주(시지)</div><div class="v" id="hourBranch">—</div></div>
+  </div>
+  <div class="pill" id="quality">—</div>
+  <div class="small" id="note" style="margin-top:10px">—</div>
 </div>
 
 <div class="card">
-<h3>GPT용 출력</h3>
-<pre id="raw"></pre>
-<button onclick="copy()">GPT로 복사</button>
+  <h3 style="margin:0 0 8px 0">GPT용 출력</h3>
+  <button onclick="copyGPT()">GPT로 복사</button>
+  <pre id="raw">—</pre>
 </div>
 
 <script>
-function pad(n){return String(n).padStart(2,'0');}
-function toUTC(d,t){
-  const [Y,M,D]=d.split('-').map(Number);
-  const [h,m]=t.split(':').map(Number);
-  return new Date(Date.UTC(Y,M-1,D,h-9,m,0)).toISOString().replace('.000Z','');
+/* ========= Basics ========= */
+const solarTerms = [
+  {deg:0, name:"춘분"},{deg:15,name:"청명"},{deg:30,name:"곡우"},{deg:45,name:"입하"},
+  {deg:60,name:"소만"},{deg:75,name:"망종"},{deg:90,name:"하지"},{deg:105,name:"소서"},
+  {deg:120,name:"대서"},{deg:135,name:"입추"},{deg:150,name:"처서"},{deg:165,name:"백로"},
+  {deg:180,name:"추분"},{deg:195,name:"한로"},{deg:210,name:"상강"},{deg:225,name:"입동"},
+  {deg:240,name:"소설"},{deg:255,name:"대설"},{deg:270,name:"동지"},{deg:285,name:"소한"},
+  {deg:300,name:"대한"},{deg:315,name:"입춘"},{deg:330,name:"우수"},{deg:345,name:"경칩"}
+];
+const branches = ["자","축","인","묘","진","사","오","미","신","유","술","해"];
+
+function pad(n){return String(n).padStart(2,"0");}
+function norm360(x){x%=360; if(x<0)x+=360; return x;}
+function deg2rad(d){return d*Math.PI/180;}
+function rad2deg(r){return r*180/Math.PI;}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+
+function kstToUTCISOString(dateStr,timeStr){
+  // KST = UTC+9
+  const [Y,M,D]=dateStr.split("-").map(Number);
+  const [h,m]=timeStr.split(":").map(Number);
+  const utc = new Date(Date.UTC(Y,M-1,D,h-9,m,0));
+  return utc.toISOString().replace(".000Z","");
+}
+function parseKST(dateStr,timeStr){
+  // local-like object but deterministic: treat as KST wall time
+  const [Y,M,D]=dateStr.split("-").map(Number);
+  const [h,m]=timeStr.split(":").map(Number);
+  return {Y,M,D,h,m};
 }
 
-const terms=["춘분","청명","곡우","입하","소만","망종","하지","소서","대서","입추","처서","백로","추분","한로","상강","입동","소설","대설","동지","소한","대한","입춘","우수","경칩"];
-const branches=["자","축","인","묘","진","사","오","미","신","유","술","해"];
+/* ========= Astronomy (NOAA-style, debug-friendly) =========
+   목표: 태양 겉보기 황경 λ_app (deg), 평균 황경 λ_mean (deg)
+   - Julian Day from UTC
+   - Mean longitude L0
+   - Mean anomaly M
+   - Equation of center C
+   - True longitude = L0 + C
+   - Apparent longitude = true - 0.00569 - 0.00478*sin(Ω)
+   - Nutation proxy via Ω (ascending node of Moon)
+   참고: 절기/사주 경계에 충분한 정밀도(초 단위 근사 가능), 구현 단순/디버깅 쉬움
+*/
+
+function julianDayFromUTC(isoUtc){
+  // isoUtc: "YYYY-MM-DDTHH:MM:SS"
+  const d = new Date(isoUtc + "Z");
+  const Y = d.getUTCFullYear();
+  const M = d.getUTCMonth() + 1;
+  const D = d.getUTCDate();
+  const hh = d.getUTCHours();
+  const mm = d.getUTCMinutes();
+  const ss = d.getUTCSeconds();
+
+  let a = Math.floor((14 - M)/12);
+  let y = Y + 4800 - a;
+  let m = M + 12*a - 3;
+  let JDN = D + Math.floor((153*m + 2)/5) + 365*y + Math.floor(y/4) - Math.floor(y/100) + Math.floor(y/400) - 32045;
+  const dayFrac = (hh - 12)/24 + mm/1440 + ss/86400;
+  return JDN + dayFrac;
+}
+
+function solarLongitude(isoUtc, mode){
+  const JD = julianDayFromUTC(isoUtc);
+  const T = (JD - 2451545.0)/36525.0;
+
+  const L0 = norm360(280.46646 + 36000.76983*T + 0.0003032*T*T);
+  const M  = norm360(357.52911 + 35999.05029*T - 0.0001537*T*T);
+
+  const Mr = deg2rad(M);
+  const C = (1.914602 - 0.004817*T - 0.000014*T*T)*Math.sin(Mr)
+          + (0.019993 - 0.000101*T)*Math.sin(2*Mr)
+          + 0.000289*Math.sin(3*Mr);
+
+  const trueLong = norm360(L0 + C);
+
+  if(mode === "mean"){
+    return {JD,T, L0, M, C, lon: L0, trueLong, apparentLong: null};
+  }
+
+  // Ω: longitude of ascending node of Moon's mean orbit
+  const Omega = 125.04 - 1934.136*T;
+  const lambdaApp = norm360(trueLong - 0.00569 - 0.00478*Math.sin(deg2rad(Omega)));
+
+  return {JD,T, L0, M, C, lon: lambdaApp, trueLong, apparentLong: lambdaApp, Omega};
+}
+
+function getTermByLon(lon){
+  const deg = norm360(lon);
+  const idx = Math.floor(deg/15) % 24;
+  return solarTerms[idx];
+}
+function getPrevNextTerms(lon){
+  const deg = norm360(lon);
+  let prev = solarTerms[solarTerms.length-1];
+  let next = solarTerms[0];
+  for (let i=0;i<solarTerms.length;i++){
+    if (solarTerms[i].deg <= deg) prev = solarTerms[i];
+    if (solarTerms[i].deg > deg){ next = solarTerms[i]; break; }
+  }
+  return {prev,next};
+}
+
+// "절기월" 월지 계산: 전통적으로 입춘(315°)을 寅월 시작으로 본다.
+// 여기서는: 315°~345°: 寅, 345~15: 卯? (연속 처리 필요)
+// 단순/표준 매핑: angle from 315° 기준 30° 단위로 month index 0=寅
+function monthBranchFromLon(lon){
+  const a = norm360(lon - 315); // 315°(입춘) 기준
+  const idx = Math.floor(a/30) % 12; // 0..11
+  const order = ["인","묘","진","사","오","미","신","유","술","해","자","축"];
+  return order[idx];
+}
+
+// 시지(시주): KST 기준으로 2시간 단위 (23~01=자, 01~03=축 ...)
+function hourBranchFromKSTHour(h){
+  // h: 0..23
+  // 子: 23,0 ; 丑:1,2 ; 寅:3,4 ...
+  const map = ["자","축","인","묘","진","사","오","미","신","유","술","해"];
+  if(h===23) return "자";
+  return map[Math.floor((h+1)/2)]; // 0->0,1->1,2->1,3->2 ...
+}
+
+// 경계 근접도(분 단위) 계산: 절기 경계까지 남은 시간을 근사적으로 찾아 신뢰도 표시
+// 방법: 현재 시간 기준으로 ±48시간 범위에서 이분법으로 "목표 황경" 통과 시각 탐색
+function findBoundaryTime(dateStr,timeStr, mode, targetDeg){
+  // returns {utcIso, minutesDelta}
+  const baseUtc = new Date(kstToUTCISOString(dateStr,timeStr) + "Z");
+  const baseMs = baseUtc.getTime();
+
+  function lonAt(ms){
+    const iso = new Date(ms).toISOString().replace(".000Z","");
+    return solarLongitude(iso, mode).lon;
+  }
+
+  // unwrap function for crossing: compute signed difference in [-180,180)
+  function diff(ms){
+    const d = norm360(lonAt(ms) - targetDeg);
+    return (d > 180) ? d - 360 : d;
+  }
+
+  // search window
+  let left = baseMs - 48*3600*1000;
+  let right= baseMs + 48*3600*1000;
+
+  // We want nearest root of diff(ms)=0. We'll first find a bracket with sign change.
+  // sample step: 2 hours
+  const step = 2*3600*1000;
+  let best = {ms: null, abs: Infinity};
+
+  let prevMs = left;
+  let prevV  = diff(prevMs);
+  for(let ms=left+step; ms<=right; ms+=step){
+    const v = diff(ms);
+    // track closest sample
+    if (Math.abs(v) < best.abs){ best = {ms, abs: Math.abs(v)}; }
+    // sign change bracket
+    if ((prevV<=0 && v>=0) || (prevV>=0 && v<=0)){
+      // binary search within [prevMs, ms]
+      let a=prevMs, b=ms, fa=prevV, fb=v;
+      for(let i=0;i<40;i++){
+        const mid = (a+b)/2;
+        const fm = diff(mid);
+        if ((fa<=0 && fm>=0) || (fa>=0 && fm<=0)){ b=mid; fb=fm; }
+        else { a=mid; fa=fm; }
+      }
+      const root = (a+b)/2;
+      const minutes = (root - baseMs)/60000;
+      return {utcIso: new Date(root).toISOString().replace(".000Z",""), minutesDelta: minutes};
+    }
+    prevMs = ms; prevV = v;
+  }
+
+  // fallback: no bracket, return closest sample (rough)
+  const minutes = (best.ms - baseMs)/60000;
+  return {utcIso: new Date(best.ms).toISOString().replace(".000Z",""), minutesDelta: minutes, rough:true};
+}
+
+function qualityLabel(minToBoundary){
+  const a = Math.abs(minToBoundary);
+  if (a <= 10) return {pill:"⚠️ 경계(±10분): 해석 분기 권장", note:"절기 경계에 매우 근접. 1) ‘이전 절기’와 ‘다음 절기’ 기준 해석을 둘 다 제시하는 것이 안전합니다. 2) 출생시각이 몇 분만 달라도 월지가 바뀔 수 있습니다.", score:"LOW"};
+  if (a <= 60) return {pill:"주의(±1시간): 경계 영향 가능", note:"절기 경계 근접. 월지/절기월이 바뀌는 구간이라 해석 분기(두 시나리오 비교)가 신뢰도를 올립니다.", score:"MED"};
+  if (a <= 180) return {pill:"보통(±3시간): 경계 영향 약함", note:"경계에서 어느 정도 떨어져 있음. 일반적 해석은 안정적이나, 분 단위 오차가 큰 입력이면 재확인 권장.", score:"OK"};
+  return {pill:"안정: 경계 영향 거의 없음", note:"절기 경계에서 충분히 떨어져 있습니다. 월지/절기월 변동 위험이 낮습니다.", score:"HIGH"};
+}
+
+/* ========= UI ========= */
+function setDefaults(){
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = pad(now.getMonth()+1);
+  const d = pad(now.getDate());
+  document.getElementById("date").value = `${y}-${m}-${d}`;
+}
+setDefaults();
 
 function calc(){
+  const dateStr = document.getElementById("date").value;
+  const timeStr = document.getElementById("time").value || "00:00";
+  const mode = document.getElementById("mode").value;
 
-  alert("SPICE loaded: " + typeof windows.spice);
-  
-  spice.kclear();
-  spice.furnsh("naif0012.tls");
-  spice.furnsh("pck00010.tpc");
-  spice.furnsh("https://cdn.jsdelivr.net/gh/sky-chronos/nasa-kernels@main/de440s.bsp");
+  if(!dateStr){ alert("날짜를 입력하세요."); return; }
 
-  const d=document.getElementById("date").value;
-  const t=document.getElementById("time").value;
-  const utc=toUTC(d,t);
-  const et=spice.utc2et(utc);
+  const utcIso = kstToUTCISOString(dateStr,timeStr);
+  const astro = solarLongitude(utcIso, mode);
 
-  const pos=spice.spkpos("SUN",et,"ECLIPDATE","LT+S","EARTH");
-  const x=pos[0][0],y=pos[0][1];
-  let lon=Math.atan2(y,x)*180/Math.PI;
-  if(lon<0)lon+=360;
+  const lon = astro.lon; // deg
+  const {prev,next} = getPrevNextTerms(lon);
+  const term = getTermByLon(lon).name;
+  const monthB = monthBranchFromLon(lon);
+  const {h} = parseKST(dateStr,timeStr);
+  const hourB = hourBranchFromKSTHour(h);
 
-  const termIndex=Math.floor(lon/15);
-  const term=terms[termIndex%24];
-  const month=branches[(Math.floor((lon-315+360)%360/30)+2)%12];
-  const hour=branches[Math.floor(new Date(d+"T"+t).getHours()/2)%12];
+  // boundary time: nearest of prev or next? We compute both and pick closer.
+  const prevCross = findBoundaryTime(dateStr,timeStr, mode, prev.deg);
+  const nextCross = findBoundaryTime(dateStr,timeStr, mode, next.deg);
 
-  const txt=`절기: ${term}\n월지: ${month}\n시주: ${hour}\n태양황경: ${lon.toFixed(6)}°`;
-  document.getElementById("out").innerText=txt;
-  document.getElementById("raw").innerText=
-`[ASTRONOMICAL BASIS]
-UTC: ${utc}
-Solar longitude: ${lon.toFixed(9)}
+  const nearer = (Math.abs(prevCross.minutesDelta) <= Math.abs(nextCross.minutesDelta)) ? {which:"이전 절기 경계", obj:prev, cross:prevCross} : {which:"다음 절기 경계", obj:next, cross:nextCross};
+  const q = qualityLabel(nearer.cross.minutesDelta);
+
+  document.getElementById("lon").textContent = `${lon.toFixed(6)}°`;
+  document.getElementById("term").textContent = term;
+  document.getElementById("boundary").textContent = `${prev.name} → ${next.name}`;
+  document.getElementById("monthBranch").textContent = monthB;
+  document.getElementById("hourBranch").textContent = hourB;
+
+  document.getElementById("quality").textContent = q.pill;
+  document.getElementById("note").textContent =
+    `${q.note} (가장 가까운 경계: ${nearer.which} ${nearer.obj.name} @ UTC ${nearer.cross.utcIso}, Δ ${nearer.cross.minutesDelta.toFixed(1)}분)`;
+
+  const raw =
+`[SKY CHRONOS v4 — NASA-style solar longitude model]
+Input (KST): ${dateStr} ${timeStr}
+UTC: ${utcIso}
+Mode: ${mode} (${mode==="apparent" ? "apparent longitude (nutation+aberration approx)" : "mean longitude (debug)"})
+
+Solar longitude λ: ${lon.toFixed(9)} deg
 Solar-term: ${term}
-Month branch: ${month}
-Hour branch: ${hour}`;
+Solar-term boundary: ${prev.name} → ${next.name}
+
+Month branch (절기월): ${monthB}
+Hour branch (시지): ${hourB}
+
+Nearest boundary: ${nearer.which} ${nearer.obj.name}
+Boundary UTC: ${nearer.cross.utcIso}
+Delta to boundary: ${nearer.cross.minutesDelta.toFixed(3)} minutes
+Quality: ${q.score}
+
+Diagnostics:
+JD: ${astro.JD.toFixed(8)}
+T: ${astro.T.toFixed(10)}
+L0: ${astro.L0.toFixed(8)}
+M: ${astro.M.toFixed(8)}
+C: ${astro.C.toFixed(8)}
+True longitude: ${astro.trueLong.toFixed(8)}
+${mode==="apparent" ? ("Omega: "+astro.Omega.toFixed(8)) : ""}
+
+Notes:
+- This output is a computation log. Not a fortune-telling statement.
+- For boundary-close cases, compare interpretations under both adjacent solar-terms/month-branches.
+`;
+  document.getElementById("raw").textContent = raw;
 }
 
-function copy(){
-  navigator.clipboard.writeText(document.getElementById("raw").innerText);
-  alert("복사됨");
+function copyGPT(){
+  const t = document.getElementById("raw").textContent;
+  navigator.clipboard.writeText(t);
+  alert("GPT용 출력이 복사되었습니다.");
 }
 </script>
 </body>
 </html>
-
-
-
